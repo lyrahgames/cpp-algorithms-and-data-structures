@@ -11,6 +11,12 @@ inline std::ostream& operator<<(std::ostream& os, const xmath::simd_util::v128s&
 	return os << "[" << v[0] << ", " << v[1] << ", " << v[2] << ", " << v[3] << "]";
 }
 
+inline std::ostream& operator<<(std::ostream& os, const xmath::simd_util::v256s& v){
+	return os << "["
+		<< v[0] << ", " << v[1] << ", " << v[2] << ", " << v[3] << ", "
+		<< v[4] << ", " << v[5] << ", " << v[6] << ", " << v[7] << "]";
+}
+
 inline std::ostream& operator<<(std::ostream& os, const xmath::simd_util::v256d& v){
 	return os << "[" << v[0] << ", " << v[1] << ", " << v[2] << ", " << v[3] << "]";
 }

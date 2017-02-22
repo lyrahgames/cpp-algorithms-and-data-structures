@@ -19,7 +19,7 @@ struct v128s{
 	v128s(v128s&&) = default;
 	v128s& operator=(v128s&&) = default;
 
-	// v128s
+	// v128
 	v128s(const __m128& vec_128): v128(vec_128){}
 	v128s& operator=(const __m128& vec_128){v128 = vec_128;}
 

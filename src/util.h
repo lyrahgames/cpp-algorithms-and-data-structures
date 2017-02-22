@@ -3,6 +3,7 @@
 // #define __UTIL_H__
 
 #include <xmath/xmath.h>
+#include <io/term_out.h>
 
 
 using namespace xmath;
