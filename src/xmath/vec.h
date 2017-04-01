@@ -323,6 +323,12 @@ inline vec<T,N> operator*(const T& s, const vec<T,N>& v){
 }
 
 template <class T, uint N>
+inline vec<T,N> operator*(const vec<T,N>& v, const T& s){
+	return s*v;
+}
+
+
+template <class T, uint N>
 inline vec<T,N> min(const vec<T,N>& v1, const vec<T,N>& v2){
 	return pack_op<N>(min<T>, v1, v2);
 }
