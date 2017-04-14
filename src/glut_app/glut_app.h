@@ -3,11 +3,14 @@
 // #define __GLUT_APP_H__
 
 #include <string.h>
-#include <GL/gl.h>
-#include <GL/glu.h>
+// #include <GL/gl.h>
+// #include <GL/glu.h>
+#include <GL/glew.h>
+// #include <glew.h>
 #include <GL/glut.h>
 
 #include <scene.h>
+#include <cqtree.h>
 
 
 namespace glut_app{
@@ -19,6 +22,169 @@ int height;
 scene_t scene;
 scene_t::primitive_t* ptmp;
 
+
+void init(cqtree* tree, uint depth){
+	tree->max_depth = depth;
+
+	const uint leaf_count = 1 << (2*depth);
+	tree->leaf_count = leaf_count;
+	tree->ldata = new cqtree::leaf[leaf_count];
+
+	const uint node_count = ((1 << (2*depth + 2)) - 1) / 3;
+	tree->node_count = node_count;
+	tree->ndata = new cqtree::node[node_count];
+
+	printf("leaf count = %u\tnode count = %u\n", leaf_count, node_count);
+}
+
+void gen_uv_offset(cqtree* tree, uint depth = 0, uint idx = 0, float u = 0.0f, float v = 0.0f){
+	if (depth >= tree->max_depth){
+		tree->ldata[idx].u = u;
+		tree->ldata[idx].v = v;
+	}else{
+		const uint step = 1 << (depth+1);
+		const float inv_step = 1.0f / float(step);
+
+		const float u2 = u + inv_step;
+		const float v2 = v + inv_step;
+
+		gen_uv_offset(tree, depth+1, 4*idx, u, v);
+		gen_uv_offset(tree, depth+1, 4*idx+1, u2, v);
+		gen_uv_offset(tree, depth+1, 4*idx+2, -u2, -v2);
+		gen_uv_offset(tree, depth+1, 4*idx+3, u, v2);
+	}
+}
+
+void gen_samples(cqtree* tree, const scene_t& scene, const scene_t::primitive_t& prim){
+	const uint offset = ((1 << (2*tree->max_depth)) - 1) /3;
+	const float step = 1.0f / float(1<<tree->max_depth);
+
+	for (uint l = 0; l < tree->leaf_count; l++){
+		float urnd, vrnd;
+		triangle_rand(urnd, vrnd);
+		float u = fabsf(tree->ldata[l].u + step * urnd);
+		float v = fabsf(tree->ldata[l].v + step * vrnd);
+
+		tree->ndata[offset + l] = map(&scene, &prim, u, v);
+		tree->ldata[l].count = 1;
+	}
+
+	for (int d = tree->max_depth-1; d >= 0; d--){
+		const uint count = 1 << (2*d);
+		const uint offset = (count - 1) / 3;
+
+		for (uint idx = 0; idx < count; idx++){
+			const uint child = offset + count + 4*idx;
+			tree->ndata[offset + idx] = 0.25f * (
+				tree->ndata[child] +
+				tree->ndata[child+1] +
+				tree->ndata[child+2] +
+				tree->ndata[child+3]
+			);
+		}
+	}
+}
+
+void accum_samples(cqtree* tree, const scene_t& scene, const scene_t::primitive_t& prim, uint d = 0, uint i = 0){
+
+	const uint offset = ((1 << (2*tree->max_depth)) - 1) /3;
+	const float step = 1.0f / float(1<<tree->max_depth);
+
+	const uint depth = tree->max_depth - d;
+	const uint node_count = 1 << (2*depth);
+
+	const uint l0 = node_count * i;
+	const uint l1 = l0 + node_count;
+
+	for (uint l = l0; l < l1; l++){
+
+		const uint count = tree->ldata[l].count;
+
+		float accum_buffer = 0.0f;
+		for (uint sid = 0; sid < 3*count; sid++){
+			float urnd, vrnd;
+			triangle_rand(urnd, vrnd);
+			float u = fabsf(tree->ldata[l].u + step * urnd);
+			float v = fabsf(tree->ldata[l].v + step * vrnd);
+			accum_buffer += map(&scene, &prim, u, v);
+		}
+		accum_buffer /= float(4*count);
+
+
+		tree->ndata[offset + l] = 0.25f * tree->ndata[offset+l] + accum_buffer;
+		tree->ldata[l].count = 4*count;
+	}
+
+	for (int did = tree->max_depth-1; did >= (int)d; did--){
+		const uint count = 1 << (2*did);
+		const uint offset = (count - 1) / 3;
+
+		const uint depth = did - d;
+		const uint node_count = 1 << (2*depth);
+
+		const uint l0 = node_count * i;
+		const uint l1 = l0 + node_count;
+
+		for (uint idx = l0; idx < l1; idx++){
+			const uint child = offset + count + 4*idx;
+			tree->ndata[offset + idx] = 0.25f * (
+				tree->ndata[child] +
+				tree->ndata[child+1] +
+				tree->ndata[child+2] +
+				tree->ndata[child+3]
+			);
+		}
+	}
+}
+
+void compress_and_accum_cqtree(cqtree* tree, uint d, uint idx, int node_id, uint step){
+
+	const uint max_step = tree->max_depth;
+	const float err_eps = 0.05f;
+	const uint count = 1 << (2*d);
+	const uint offset = (count - 1) / 3;
+
+
+	if (step >= max_step){
+		accum_samples(tree, scene, *ptmp, d, idx);
+		ptmp->qtmap.qtree[node_id].child = ~(ptmp->qtmap.sample.size());
+		ptmp->qtmap.sample.push_back(tree->ndata[offset + idx]);
+		return;
+	}
+
+	const float sample = tree->ndata[offset + idx];
+	const float inv_sample = 1.0f / (sample + 0.05);
+	const uint child = offset + count + 4*idx;
+
+	float err0 = fabsf(tree->ndata[child] - sample) * inv_sample;
+	float err1 = fabsf(tree->ndata[child+1] - sample) * inv_sample;
+	float err2 = fabsf(tree->ndata[child+2] - sample) * inv_sample;
+	float err3 = fabsf(tree->ndata[child+3] - sample) * inv_sample;
+
+	const bool finish = (err0 <= err_eps) && (err1 <= err_eps) && (err2 <= err_eps) && (err3 <= err_eps);
+
+	if (finish){
+		ptmp->qtmap.qtree[node_id].child = ~(ptmp->qtmap.sample.size());
+		ptmp->qtmap.sample.push_back(sample);
+		return;
+	}
+
+	accum_samples(tree, scene, *ptmp, d, idx);
+
+	ptmp->qtmap.qtree[node_id].child = ptmp->qtmap.qtree.size();
+	ptmp->qtmap.qtree.push_back(node{});
+	ptmp->qtmap.qtree.push_back(node{});
+	ptmp->qtmap.qtree.push_back(node{});
+	ptmp->qtmap.qtree.push_back(node{});
+
+	compress_and_accum_cqtree(tree, d+1, 4*idx, ptmp->qtmap.qtree[node_id].child, step+1);
+
+	compress_and_accum_cqtree(tree, d+1, 4*idx+1, ptmp->qtmap.qtree[node_id].child+1, step+1);
+
+	compress_and_accum_cqtree(tree, d+1, 4*idx+2, ptmp->qtmap.qtree[node_id].child+2, step+1);
+
+	compress_and_accum_cqtree(tree, d+1, 4*idx+3, ptmp->qtmap.qtree[node_id].child+3, step+1);
+}
 
 inline void render(){
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -55,10 +221,12 @@ inline void render(){
 					// pixel_buffer[3*idx+2] += 255.0f * sum(uv);
 					// memset(pixel_buffer+3*idx, tmp, 3*sizeof(unsigned char));
 					// accum_buffer += scene.p_data[pid].uvbmp(uv.x, uv.y);
-					accum_buffer += scene.p_data[pid].uvmap(uv.x, uv.y);
+					// accum_buffer += scene.p_data[pid].uvmap(uv.x, uv.y);
 					// accum_buffer += scene.p_data[pid].uvmap.nn(uv.x, uv.y);
-					// accum_buffer += scene.p_data[pid].qtmap(uv.x, uv.y);
-					// caccum_buffer += scene.p_data[pid].qtmap.step;
+					accum_buffer += scene.p_data[pid].qtmap(uv.x, uv.y);
+					// accum_buffer += scene.p_data[pid].treemap(uv.x, uv.y);
+					// caccum_buffer += scene.p_data[pid].qtmap.step / 9.0f;
+					caccum_buffer += log2f(scene.p_data[pid].treemap.buffer(uv.x,uv.y)) / 12.0f;
 				}
 			}
 
@@ -66,7 +234,7 @@ inline void render(){
 			caccum_buffer *= inv_sample_count;
 
 			memset(pixel_buffer+3*idx, (unsigned char)(255.0f*accum_buffer), 3*sizeof(unsigned char));
-			// memset(pixel_buffer+3*idx, (unsigned char)(255.0f*(caccum_buffer)/9.0f), 3*sizeof(unsigned char));
+			// memset(pixel_buffer+3*idx, (unsigned char)(255.0f*(caccum_buffer)), 3*sizeof(unsigned char));
 		}
 	}
 
@@ -116,7 +284,19 @@ inline void init(int argc, char** argv){
 	glutReshapeFunc(resize);
 
 
+	GLenum err = glewInit();
+	if(GLEW_OK != err){
+	  printf("Error: %s\n",glewGetErrorString(err));
+	}
 
+	printf("Status: Using GLEW %s\n", glewGetString(GLEW_VERSION));
+
+	//check
+	bool check_pbo = glewGetExtension("GL_ARB_pixel_buffer_object");
+	printf("OGL: support for PBO [%c]\n", check_pbo ? 'X' : ' ');
+
+	bool check_tnp2 = glewGetExtension("GL_ARB_texture_non_power_of_two");
+	printf("OGL: texture_non_power_of_two [%c]\n", check_tnp2 ? 'X' : ' ');
 
 
 	// scene description
@@ -194,39 +374,6 @@ inline void init(int argc, char** argv){
 	// end of uvmap generation
 
 
-	// qtree map generation
-	for (uint i = 0; i < scene.p_data.size(); i++){
-		scene_t::primitive_t* p = &scene.p_data[i];
-
-		// p->qtmap.qtree.push_back({1});
-		// p->qtmap.qtree.push_back({-1});
-		// p->qtmap.qtree.push_back({-2});
-		// p->qtmap.qtree.push_back({-3});
-		// p->qtmap.qtree.push_back({5});
-		// p->qtmap.qtree.push_back({-4});
-		// p->qtmap.qtree.push_back({-5});
-		// p->qtmap.qtree.push_back({-6});
-		// p->qtmap.qtree.push_back({-7});
-
-		// p->qtmap.sample.push_back(map(&scene, p, 0.166666f, 0.166666f));
-		// p->qtmap.sample.push_back(map(&scene, p, 0.666666f, 0.166666f));
-		// p->qtmap.sample.push_back(map(&scene, p, 0.333333f, 0.333333f));
-		// p->qtmap.sample.push_back(map(&scene, p, 0.166666f + 0.5f*0.166666f, 0.666666f + 0.5f*0.166666f));
-		// p->qtmap.sample.push_back(map(&scene, p, 0.166666f + 0.5f*0.666666f, 0.666666f + 0.5f*0.166666f));
-		// p->qtmap.sample.push_back(map(&scene, p, 0.166666f + 0.5f*0.333333f, 0.666666f + 0.5f*0.333333f));
-		// p->qtmap.sample.push_back(map(&scene, p, 0.166666f + 0.5f*0.166666f, 0.666666f + 0.5f*0.666666f));
-
-		ptmp = p;
-		float sample = map(&scene, p, 0.333333f, 0.333333f);
-		p->qtmap.qtree.push_back(node{});
-		gen(sample, 0, 0, 0.0f, 0.0f, false);
-	}
-
-	// for (uint i = 0; i < ptmp->qtmap.qtree.size(); i++){
-	// 	printf("%i\t", ptmp->qtmap.qtree[i].child);
-	// }
-	// printf("\n");
-	printf("size qtree = %i\n", ptmp->qtmap.qtree.size());
 
 
 	const uint map_order = 1 << 6;
@@ -278,6 +425,39 @@ inline void init(int argc, char** argv){
 			}
 		}
 	}
+
+	// sample tree
+	for (uint pid = 0; pid < scene.p_data.size(); pid++){
+		// cqtree tree;
+		scene_t::primitive_t* p = &scene.p_data[pid];
+		init(&p->treemap, 5);
+		p->treemap.cur_depth = 5;
+		gen_uv_offset(&p->treemap);
+		gen_samples(&p->treemap, scene, *p);
+		// accum_samples(&p->treemap, scene, *p);
+		// accum_samples(&p->treemap, scene, *p, 1, 2);
+		// accum_samples(&p->treemap, scene, *p, 2, 9);
+
+	}
+
+
+
+	// qtree map generation
+	for (uint i = 0; i < scene.p_data.size(); i++){
+		scene_t::primitive_t* p = &scene.p_data[i];
+
+		ptmp = p;
+		// float sample = map(&scene, p, 0.333333f, 0.333333f);
+		p->qtmap.qtree.push_back(node{});
+		// gen(sample, 0, 0, 0.0f, 0.0f, false);
+		compress_and_accum_cqtree(&p->treemap, 0, 0, 0, 0);
+	}
+
+	// for (uint i = 0; i < ptmp->qtmap.qtree.size(); i++){
+	// 	printf("%i\t", ptmp->qtmap.qtree[i].child);
+	// }
+	// printf("\n");
+	printf("size qtree = %i\n", ptmp->qtmap.qtree.size());
 }
 
 inline void gen(float sample, int node_id, uint step, float u, float v, bool turn){
@@ -354,6 +534,7 @@ inline void gen(float sample, int node_id, uint step, float u, float v, bool tur
 
 	}
 }
+
 
 inline int exec(){
 	glutMainLoop();

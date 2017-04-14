@@ -8,6 +8,7 @@
 #include <triangle_uvbmp.h>
 #include <triangle_qtree_uvbmp.h>
 #include <triangle_uvmap.h>
+#include <cqtree.h>
 
 
 struct scene_t{
@@ -18,6 +19,7 @@ struct scene_t{
 		triangle_uvbmp uvbmp;
 		triangle_qtree_uvbmp qtmap;
 		triangle_uvmap uvmap;
+		cqtree treemap;
 	};
 
 	std::vector<vertex_t> v_data;
@@ -63,10 +65,11 @@ inline float map(const scene_t* scene, const scene_t::primitive_t* p, float u, f
 		scene->v_data[p->v_id[0]] * (1.0f - u - v) +
 		scene->v_data[p->v_id[1]] * u +
 		scene->v_data[p->v_id[2]] * v;
-	const float omega = 5.5f;
+	const float omega = 1.5f;
 	return sq(sinf(omega*sq(pos.x) - 2.0f*omega*pos.y)) * sqrt(sq(cosf(2.0f*omega*sq(pos.y) + omega*pos.x*pos.y)));
 	// return u+v;
 	// return (u*u + v*v < 0.5f)?(0.1f):(0.9f);
+	// return (u*u + v < 0.5f)?(v):(u);
 }
 
 inline void triangle_rand(float& u, float& v){
