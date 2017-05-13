@@ -5,10 +5,11 @@
 #include <iostream>
 
 #include <xutil/seq_t.h>
+#include <xutil/heap_sort.h>
 
 
 template <class T>
-std::ostream& operator<<(std::ostream& os, const xutil::seq_t<T>& s){
+inline std::ostream& operator<<(std::ostream& os, const xutil::seq_t<T>& s){
 	if (!s.size)
 		return os << "()";
 
@@ -17,6 +18,11 @@ std::ostream& operator<<(std::ostream& os, const xutil::seq_t<T>& s){
 		os << "," << s.data[i];
 	}
 	return os << ")";
+}
+
+template <class T>
+inline std::ostream& operator<<(std::ostream& os, const xutil::binary_heap_t<T>& h){
+	return os << xutil::seq_t<T>{h.data, h.max_size};
 }
 
 
