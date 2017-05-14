@@ -85,6 +85,13 @@ inline void heap_sort(binary_heap<T>* heap){
 }
 
 template <class T>
+inline void heap_sort(T* seq, uint size){
+	binary_heap<T> heap{seq, size, size};
+
+	heap_sort(&heap);
+}
+
+template <class T>
 inline T max(const binary_heap<T>* heap){
 	return heap->data[0];
 }
