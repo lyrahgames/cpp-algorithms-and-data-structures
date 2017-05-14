@@ -13,6 +13,7 @@ struct binary_heap{
 	uint max_size;
 };
 
+
 inline uint parent_idx(uint node){
 	return (node - 1) >> 1; // if (node == 0) function returns uint(-1)
 }
@@ -81,6 +82,51 @@ inline void heap_sort(binary_heap<T>* heap){
 		heap->size--;
 		sift_down(heap, 0);
 	}
+}
+
+template <class T>
+inline T max(const binary_heap<T>* heap){
+	return heap->data[0];
+}
+
+template <class T>
+inline T max(const binary_heap<T>& heap){
+	return heap.data[0];
+}
+
+template <class T>
+inline int extract_max(binary_heap<T>* heap, T* max){
+	if (heap->size < 1)
+		return -1;
+
+	*max = heap->data[0];
+	heap->size--;
+	heap->data[0] = heap->data[heap->size];
+
+	sift_down(heap, 0);
+
+	return 0;
+}
+
+template <class T>
+inline int insert(binary_heap<T>* heap, const T& key){
+	if (heap->size >= heap->max_size)
+		return -1;
+
+	heap->data[heap->size] = key;
+
+	uint node = heap->size;
+	uint par = parent_idx(node);
+	while ((node > 0) && (heap->data[par] < heap->data[node])){
+		swap(heap, par, node);
+
+		node = par;
+		par = parent_idx(par);
+	}
+
+	heap->size++;
+
+	return 0;
 }
 
 
