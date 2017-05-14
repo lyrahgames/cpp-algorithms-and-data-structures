@@ -7,6 +7,7 @@
 #include <xutil/merge_sort.h>
 #include <xutil/heap_sort.h>
 #include <xutil/quick_sort.h>
+#include <xutil/binary_heap.h>
 #include <xutil/xutil_term_out.h>
 
 // #endif // __XUTIL_H__
